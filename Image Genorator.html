@@ -3,21 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fast Object Tracker</title>
+<title>Mobile-Friendly Object Tracker</title>
 <style>
 body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
 video, canvas { border: 1px solid #333; margin-top: 10px; touch-action: none; }
 #controls { margin: 10px; }
+button { margin: 0 5px; padding: 8px 12px; }
 </style>
 </head>
 <body>
-<h1>Fast Object Tracker</h1>
+<h1>Object Tracker</h1>
 <div id="controls">
-<button id="screenshotBtn">Screen Shot</button>
-<button id="applyBtn">Apply Tracking</button>
-<button id="flipBtn">Flip Camera</button>
+  <button id="screenshotBtn">Screen Shot</button>
+  <button id="applyBtn">Apply Tracking</button>
+  <button id="flipBtn">Flip Camera</button>
 </div>
-<video id="video" autoplay playsinline width="320" height="240"></video>
+
+<video id="video" autoplay playsinline muted width="320" height="240"></video>
 <canvas id="canvas" width="320" height="240"></canvas>
 
 <script>
@@ -25,27 +27,35 @@ const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
-let template = null;  // stores the selected template image
-let templateRect = null; // {x,y,w,h}
+let template = null;
+let templateRect = null;
 let isSelecting = false;
 let startX=0, startY=0;
-let currentFacingMode = "environment";
 let stream = null;
+let currentFacingMode = "environment"; // default back camera
 
-// --- CAMERA ---
+// --- START CAMERA ---
 async function startCamera(facingMode){
     if(stream) stream.getTracks().forEach(t=>t.stop());
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }});
+    try{
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facingMode }
+        });
         video.srcObject = stream;
-    } catch(e){ alert("Camera error: "+e); }
+    } catch(e){
+        console.log("Camera access failed, using default: ", e);
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+    }
 }
+
+// Initialize
 startCamera(currentFacingMode);
 
 // --- SCREENSHOT ---
 document.getElementById('screenshotBtn').addEventListener('click', ()=>{
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    template = null;  // reset template selection
+    template = null;
     templateRect = null;
 });
 
@@ -55,7 +65,7 @@ document.getElementById('flipBtn').addEventListener('click', ()=>{
     startCamera(currentFacingMode);
 });
 
-// --- DRAW RECTANGLE ---
+// --- DRAW RECTANGLE (mouse + touch) ---
 function getPos(e){
     const rect = canvas.getBoundingClientRect();
     let clientX = e.clientX, clientY = e.clientY;
@@ -76,30 +86,32 @@ function startDraw(e){
     const pos = getPos(e);
     startX = pos.x; startY = pos.y;
 }
+
 function drawRect(e){
     if(!isSelecting) return;
     const pos = getPos(e);
     const w = pos.x - startX;
     const h = pos.y - startY;
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    ctx.drawImage(video,0,0,canvas.width,canvas.height); // redraw
     ctx.strokeStyle = 'red';
     ctx.lineWidth = 2;
     ctx.strokeRect(startX,startY,w,h);
     e.preventDefault();
 }
+
 function endDraw(e){
     if(!isSelecting) return;
     const pos = getPos(e);
     templateRect = {
         x: Math.min(startX,pos.x),
         y: Math.min(startY,pos.y),
-        w: Math.abs(pos.x - startX),
-        h: Math.abs(pos.y - startY)
+        w: Math.abs(pos.x-startX),
+        h: Math.abs(pos.y-startY)
     };
     // Extract template image and downscale for speed
     const tmpCanvas = document.createElement('canvas');
     const tmpCtx = tmpCanvas.getContext('2d');
-    const maxSize = 50; // template size for fast matching
+    const maxSize = 50; // template size
     tmpCanvas.width = maxSize;
     tmpCanvas.height = maxSize;
     tmpCtx.drawImage(canvas,
@@ -120,7 +132,38 @@ function applyTracking(){
         const frame = ctx.getImageData(0,0,canvas.width,canvas.height);
 
         let bestDiff = Infinity;
-        let bestX = 0, bestY = 0;
+        let bestX=0, bestY=0;
         const step = 4; // scan every 4 pixels for speed
+
         for(let y=0; y<=frame.height-t.height; y+=step){
             for(let x=0; x<=frame.width-t.width; x+=step){
+                let diff=0;
+                for(let ty=0; ty<t.height; ty+=2){
+                    for(let tx=0; tx<t.width; tx+=2){
+                        const fi = ((y+ty)*frame.width + (x+tx))*4;
+                        const ti = (ty*t.width + tx)*4;
+                        diff += Math.abs(frame.data[fi]-t.data[ti]);
+                        diff += Math.abs(frame.data[fi+1]-t.data[ti+1]);
+                        diff += Math.abs(frame.data[fi+2]-t.data[ti+2]);
+                    }
+                }
+                if(diff<bestDiff){ bestDiff=diff; bestX=x; bestY=y; }
+            }
+        }
+
+        // Draw rectangle on live feed (scaled to original size)
+        const scaleX = templateRect.w / t.width;
+        const scaleY = templateRect.h / t.height;
+        ctx.strokeStyle = 'lime';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bestX,bestY,t.width*scaleX, t.height*scaleY);
+
+        requestAnimationFrame(matchFrame);
+    }
+    matchFrame();
+}
+
+document.getElementById('applyBtn').addEventListener('click', applyTracking);
+</script>
+</body>
+</html>
