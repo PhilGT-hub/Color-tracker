@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile-Friendly Object Tracker</title>
+<title>Fixed Mobile Object Tracker</title>
 <style>
 body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
 video, canvas { border: 1px solid #333; margin-top: 10px; touch-action: none; }
@@ -12,7 +12,7 @@ button { margin: 0 5px; padding: 8px 12px; }
 </style>
 </head>
 <body>
-<h1>Object Tracker</h1>
+<h1>Fixed Object Tracker</h1>
 <div id="controls">
   <button id="screenshotBtn">Screen Shot</button>
   <button id="applyBtn">Apply Tracking</button>
@@ -21,26 +21,27 @@ button { margin: 0 5px; padding: 8px 12px; }
 
 <video id="video" autoplay playsinline muted width="320" height="240"></video>
 <canvas id="canvas" width="320" height="240"></canvas>
+<canvas id="screenshotCanvas" width="320" height="240" style="display:none"></canvas>
 
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const screenshotCanvas = document.getElementById('screenshotCanvas');
+const scCtx = screenshotCanvas.getContext('2d');
 
 let template = null;
 let templateRect = null;
 let isSelecting = false;
 let startX=0, startY=0;
 let stream = null;
-let currentFacingMode = "environment"; // default back camera
+let currentFacingMode = "environment";
 
-// --- START CAMERA ---
+// --- CAMERA ---
 async function startCamera(facingMode){
     if(stream) stream.getTracks().forEach(t=>t.stop());
     try{
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: facingMode }
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
         video.srcObject = stream;
     } catch(e){
         console.log("Camera access failed, using default: ", e);
@@ -48,12 +49,11 @@ async function startCamera(facingMode){
         video.srcObject = stream;
     }
 }
-
-// Initialize
 startCamera(currentFacingMode);
 
 // --- SCREENSHOT ---
 document.getElementById('screenshotBtn').addEventListener('click', ()=>{
+    scCtx.drawImage(video,0,0,canvas.width,canvas.height);
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
     template = null;
     templateRect = null;
@@ -65,7 +65,7 @@ document.getElementById('flipBtn').addEventListener('click', ()=>{
     startCamera(currentFacingMode);
 });
 
-// --- DRAW RECTANGLE (mouse + touch) ---
+// --- DRAW RECTANGLE ---
 function getPos(e){
     const rect = canvas.getBoundingClientRect();
     let clientX = e.clientX, clientY = e.clientY;
@@ -81,7 +81,7 @@ canvas.addEventListener('mouseup', endDraw);
 canvas.addEventListener('touchend', endDraw);
 
 function startDraw(e){
-    if(!ctx) return;
+    if(!scCtx) return;
     isSelecting = true;
     const pos = getPos(e);
     startX = pos.x; startY = pos.y;
@@ -92,7 +92,7 @@ function drawRect(e){
     const pos = getPos(e);
     const w = pos.x - startX;
     const h = pos.y - startY;
-    ctx.drawImage(video,0,0,canvas.width,canvas.height); // redraw
+    ctx.drawImage(screenshotCanvas,0,0,canvas.width,canvas.height);
     ctx.strokeStyle = 'red';
     ctx.lineWidth = 2;
     ctx.strokeRect(startX,startY,w,h);
@@ -108,13 +108,14 @@ function endDraw(e){
         w: Math.abs(pos.x-startX),
         h: Math.abs(pos.y-startY)
     };
-    // Extract template image and downscale for speed
+    // Extract template from screenshotCanvas and downscale
     const tmpCanvas = document.createElement('canvas');
     const tmpCtx = tmpCanvas.getContext('2d');
-    const maxSize = 50; // template size
+    const maxSize = 50;
     tmpCanvas.width = maxSize;
     tmpCanvas.height = maxSize;
-    tmpCtx.drawImage(canvas,
+    tmpCtx.drawImage(
+        screenshotCanvas,
         templateRect.x, templateRect.y, templateRect.w, templateRect.h,
         0,0,maxSize,maxSize
     );
@@ -151,7 +152,6 @@ function applyTracking(){
             }
         }
 
-        // Draw rectangle on live feed (scaled to original size)
         const scaleX = templateRect.w / t.width;
         const scaleY = templateRect.h / t.height;
         ctx.strokeStyle = 'lime';
