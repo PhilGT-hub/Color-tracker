@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Object Tracker with Camera Flip</title>
+<title>Object Tracker with Drawing</title>
 <style>
   body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
-  video, canvas { border: 1px solid #333; margin-top: 10px; }
+  video, canvas { border: 1px solid #333; margin-top: 10px; touch-action: none; }
   #controls { margin: 10px; }
 </style>
 </head>
 <body>
-<h1>Object Tracker with Camera Flip</h1>
+<h1>Object Tracker with Drawing</h1>
 <div id="controls">
   <button id="screenshotBtn">Screen Shot</button>
   <button id="applyBtn">Apply Tracking</button>
@@ -33,62 +33,15 @@ let startX = 0, startY = 0;
 let currentFacingMode = "environment"; // start with back camera
 let stream = null;
 
-// Helper: stop current camera
-function stopStream() {
-    if(stream){
-        stream.getTracks().forEach(track => track.stop());
-    }
-}
-
-// Start camera with specific facingMode
-async function startCamera(facingMode) {
-    stopStream();
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: facingMode }
-        });
+// Start camera with facingMode
+async function startCamera(facingMode){
+    if(stream) stream.getTracks().forEach(track => track.stop());
+    try{
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
         video.srcObject = stream;
-    } catch(err){
-        alert("Camera error: " + err);
-    }
+    }catch(err){ alert("Camera error: "+err); }
 }
-
-// Initialize camera
 startCamera(currentFacingMode);
-
-// Mouse events for drawing selection rectangle
-canvas.addEventListener('mousedown', e => {
-    if(!templateData) return;
-    isSelecting = true;
-    const rect = canvas.getBoundingClientRect();
-    startX = e.clientX - rect.left;
-    startY = e.clientY - rect.top;
-});
-canvas.addEventListener('mousemove', e => {
-    if(!isSelecting) return;
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const w = mouseX - startX;
-    const h = mouseY - startY;
-    ctx.putImageData(templateData,0,0);
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(startX,startY,w,h);
-});
-canvas.addEventListener('mouseup', e => {
-    if(!isSelecting) return;
-    const rect = canvas.getBoundingClientRect();
-    const endX = e.clientX - rect.left;
-    const endY = e.clientY - rect.top;
-    templateRect = {
-        x: Math.min(startX,endX),
-        y: Math.min(startY,endY),
-        w: Math.abs(endX-startX),
-        h: Math.abs(endY-startY)
-    };
-    isSelecting = false;
-});
 
 // Screenshot
 document.getElementById('screenshotBtn').addEventListener('click', () => {
@@ -97,12 +50,64 @@ document.getElementById('screenshotBtn').addEventListener('click', () => {
     templateRect = null;
 });
 
-// Apply tracking (template matching)
+// Flip camera
+document.getElementById('flipBtn').addEventListener('click', () => {
+    currentFacingMode = currentFacingMode==="environment"?"user":"environment";
+    startCamera(currentFacingMode);
+});
+
+// Handle mouse + touch events
+function getPos(e){
+    const rect = canvas.getBoundingClientRect();
+    let clientX = e.clientX, clientY = e.clientY;
+    if(e.touches){ clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+    return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+canvas.addEventListener('mousedown', startDraw);
+canvas.addEventListener('touchstart', startDraw);
+canvas.addEventListener('mousemove', drawRect);
+canvas.addEventListener('touchmove', drawRect);
+canvas.addEventListener('mouseup', endDraw);
+canvas.addEventListener('touchend', endDraw);
+
+function startDraw(e){
+    if(!templateData) return;
+    isSelecting = true;
+    const pos = getPos(e);
+    startX = pos.x; startY = pos.y;
+}
+
+function drawRect(e){
+    if(!isSelecting || !templateData) return;
+    const pos = getPos(e);
+    const w = pos.x - startX;
+    const h = pos.y - startY;
+    ctx.putImageData(templateData,0,0); // redraw screenshot
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(startX,startY,w,h);
+    e.preventDefault();
+}
+
+function endDraw(e){
+    if(!isSelecting || !templateData) return;
+    const pos = getPos(e);
+    templateRect = {
+        x: Math.min(startX,pos.x),
+        y: Math.min(startY,pos.y),
+        w: Math.abs(pos.x - startX),
+        h: Math.abs(pos.y - startY)
+    };
+    isSelecting = false;
+}
+
+// Apply template tracking
 function applyTracking() {
-    if(!templateRect){ alert('Draw a rectangle on screenshot first'); return; }
+    if(!templateRect){ alert('Draw a rectangle first'); return; }
     const t = ctx.getImageData(templateRect.x, templateRect.y, templateRect.w, templateRect.h);
 
-    function matchFrame() {
+    function matchFrame(){
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
         const frame = ctx.getImageData(0,0,canvas.width,canvas.height);
         let bestDiff = Infinity;
@@ -136,12 +141,6 @@ function applyTracking() {
     }
     matchFrame();
 }
-
-// Flip camera
-document.getElementById('flipBtn').addEventListener('click', () => {
-    currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
-    startCamera(currentFacingMode);
-});
 
 document.getElementById('applyBtn').addEventListener('click', applyTracking);
 </script>
