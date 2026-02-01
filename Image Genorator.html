@@ -3,164 +3,147 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Multi-Color Tracker</title>
+<title>Object Tracker with Camera Flip</title>
 <style>
   body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
   video, canvas { border: 1px solid #333; margin-top: 10px; }
-  #crosshair {
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    margin-left: -10px;
-    margin-top: -10px;
-    pointer-events: none;
-    border-left: 1px solid red;
-    border-top: 1px solid red;
-    border-right: 1px solid red;
-    border-bottom: 1px solid red;
-  }
   #controls { margin: 10px; }
-  .picker-container { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-  .picker-item { display: flex; align-items: center; gap: 5px; }
 </style>
 </head>
 <body>
-<h1>Multi-Color Crosshair Tracker</h1>
-<div id="instructions">Drag the crosshair over the video and click to add a color to track (exact RGB match).</div>
-
+<h1>Object Tracker with Camera Flip</h1>
 <div id="controls">
-  <button id="addPickerBtn">Add Color Picker</button>
+  <button id="screenshotBtn">Screen Shot</button>
+  <button id="applyBtn">Apply Tracking</button>
+  <button id="flipBtn">Flip Camera</button>
 </div>
-<div class="picker-container" id="pickerContainer"></div>
 
 <video id="video" autoplay playsinline width="320" height="240"></video>
 <canvas id="canvas" width="320" height="240"></canvas>
-<div id="crosshair"></div>
 
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-const crosshair = document.getElementById('crosshair');
-const pickerContainer = document.getElementById('pickerContainer');
-let canvasRect = null;
 
-// Array of colors to track
-let trackedColors = [];
+let templateData = null;
+let templateRect = null;
+let isSelecting = false;
+let startX = 0, startY = 0;
+let currentFacingMode = "environment"; // start with back camera
+let stream = null;
 
-// Access webcam
-navigator.mediaDevices.getUserMedia({ video: true })
-  .then(stream => { video.srcObject = stream; })
-  .catch(err => { alert('Error accessing webcam: ' + err); });
+// Helper: stop current camera
+function stopStream() {
+    if(stream){
+        stream.getTracks().forEach(track => track.stop());
+    }
+}
 
-// Update crosshair position
-document.addEventListener('mousemove', (e) => {
-    crosshair.style.left = e.clientX + "px";
-    crosshair.style.top = e.clientY + "px";
-});
-
-// Add a color picker dynamically
-document.getElementById('addPickerBtn').addEventListener('click', () => {
-    const pickerDiv = document.createElement('div');
-    pickerDiv.className = 'picker-item';
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = '#ff0000';
-    pickerDiv.appendChild(input);
-    const label = document.createElement('span');
-    label.textContent = 'Pick';
-    pickerDiv.appendChild(label);
-    pickerContainer.appendChild(pickerDiv);
-    trackedColors.push({color: [255,0,0], element: input}); // default red
-
-    input.addEventListener('input', () => {
-        trackedColors.forEach(tc => {
-            if(tc.element === input) {
-                tc.color = hexToRgb(input.value);
-            }
+// Start camera with specific facingMode
+async function startCamera(facingMode) {
+    stopStream();
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facingMode }
         });
-    });
+        video.srcObject = stream;
+    } catch(err){
+        alert("Camera error: " + err);
+    }
+}
+
+// Initialize camera
+startCamera(currentFacingMode);
+
+// Mouse events for drawing selection rectangle
+canvas.addEventListener('mousedown', e => {
+    if(!templateData) return;
+    isSelecting = true;
+    const rect = canvas.getBoundingClientRect();
+    startX = e.clientX - rect.left;
+    startY = e.clientY - rect.top;
+});
+canvas.addEventListener('mousemove', e => {
+    if(!isSelecting) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const w = mouseX - startX;
+    const h = mouseY - startY;
+    ctx.putImageData(templateData,0,0);
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(startX,startY,w,h);
+});
+canvas.addEventListener('mouseup', e => {
+    if(!isSelecting) return;
+    const rect = canvas.getBoundingClientRect();
+    const endX = e.clientX - rect.left;
+    const endY = e.clientY - rect.top;
+    templateRect = {
+        x: Math.min(startX,endX),
+        y: Math.min(startY,endY),
+        w: Math.abs(endX-startX),
+        h: Math.abs(endY-startY)
+    };
+    isSelecting = false;
 });
 
-// Pick color under crosshair
-canvas.addEventListener('click', (e) => {
-    if (!canvasRect) canvasRect = canvas.getBoundingClientRect();
-    const x = Math.floor(e.clientX - canvasRect.left);
-    const y = Math.floor(e.clientY - canvasRect.top);
-    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
-
-    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const idx = (y * canvas.width + x) * 4;
-    const pickedColor = [frame.data[idx], frame.data[idx+1], frame.data[idx+2]];
-
-    // Add new tracked color
-    const pickerDiv = document.createElement('div');
-    pickerDiv.className = 'picker-item';
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = rgbToHex(...pickedColor);
-    pickerDiv.appendChild(input);
-    const label = document.createElement('span');
-    label.textContent = 'Picked';
-    pickerDiv.appendChild(label);
-    pickerContainer.appendChild(pickerDiv);
-
-    trackedColors.push({color: pickedColor, element: input});
-
-    input.addEventListener('input', () => {
-        trackedColors.forEach(tc => {
-            if(tc.element === input) {
-                tc.color = hexToRgb(input.value);
-            }
-        });
-    });
+// Screenshot
+document.getElementById('screenshotBtn').addEventListener('click', () => {
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    templateData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    templateRect = null;
 });
 
-// Process video frames
-function processFrame() {
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = frame.data;
+// Apply tracking (template matching)
+function applyTracking() {
+    if(!templateRect){ alert('Draw a rectangle on screenshot first'); return; }
+    const t = ctx.getImageData(templateRect.x, templateRect.y, templateRect.w, templateRect.h);
 
-    trackedColors.forEach(tc => {
-        let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-        let found = false;
-        for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-                const i = (y * canvas.width + x) * 4;
-                const r = data[i], g = data[i+1], b = data[i+2];
-                if(r === tc.color[0] && g === tc.color[1] && b === tc.color[2]) {
-                    found = true;
-                    if(x < minX) minX = x;
-                    if(y < minY) minY = y;
-                    if(x > maxX) maxX = x;
-                    if(y > maxY) maxY = y;
+    function matchFrame() {
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        const frame = ctx.getImageData(0,0,canvas.width,canvas.height);
+        let bestDiff = Infinity;
+        let bestX=0, bestY=0;
+
+        for(let y=0; y <= frame.height - t.height; y+=2){
+            for(let x=0; x <= frame.width - t.width; x+=2){
+                let diff = 0;
+                for(let ty=0; ty<t.height; ty+=2){
+                    for(let tx=0; tx<t.width; tx+=2){
+                        const fi = ((y+ty)*frame.width + (x+tx))*4;
+                        const ti = (ty*t.width + tx)*4;
+                        diff += Math.abs(frame.data[fi]-t.data[ti]);
+                        diff += Math.abs(frame.data[fi+1]-t.data[ti+1]);
+                        diff += Math.abs(frame.data[fi+2]-t.data[ti+2]);
+                    }
+                }
+                if(diff < bestDiff){
+                    bestDiff = diff;
+                    bestX = x;
+                    bestY = y;
                 }
             }
         }
-        if(found) {
-            ctx.strokeStyle = rgbToHex(...tc.color);
-            ctx.lineWidth = 2;
-            ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
-        }
-    });
 
-    requestAnimationFrame(processFrame);
+        ctx.strokeStyle = 'lime';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bestX,bestY,t.width,t.height);
+
+        requestAnimationFrame(matchFrame);
+    }
+    matchFrame();
 }
 
-video.addEventListener('play', () => { 
-    canvasRect = canvas.getBoundingClientRect();
-    processFrame(); 
+// Flip camera
+document.getElementById('flipBtn').addEventListener('click', () => {
+    currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+    startCamera(currentFacingMode);
 });
 
-// Helpers
-function hexToRgb(hex) {
-    hex = hex.replace('#','');
-    return [parseInt(hex.substr(0,2),16), parseInt(hex.substr(2,2),16), parseInt(hex.substr(4,2),16)];
-}
-function rgbToHex(r,g,b){
-    return "#" + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
-}
+document.getElementById('applyBtn').addEventListener('click', applyTracking);
 </script>
 </body>
 </html>
