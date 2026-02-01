@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fixed Mobile Object Tracker</title>
+<title>Object Tracker No Rectangle Required</title>
 <style>
 body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
 video, canvas { border: 1px solid #333; margin-top: 10px; touch-action: none; }
@@ -12,7 +12,7 @@ button { margin: 0 5px; padding: 8px 12px; }
 </style>
 </head>
 <body>
-<h1>Fixed Object Tracker</h1>
+<h1>Object Tracker (No Rectangle Needed)</h1>
 <div id="controls">
   <button id="screenshotBtn">Screen Shot</button>
   <button id="applyBtn">Apply Tracking</button>
@@ -108,12 +108,13 @@ function endDraw(e){
         w: Math.abs(pos.x-startX),
         h: Math.abs(pos.y-startY)
     };
-    // Extract template from screenshotCanvas and downscale
+    // Extract template from screenshotCanvas
     const tmpCanvas = document.createElement('canvas');
     const tmpCtx = tmpCanvas.getContext('2d');
     const maxSize = 50;
     tmpCanvas.width = maxSize;
     tmpCanvas.height = maxSize;
+
     tmpCtx.drawImage(
         screenshotCanvas,
         templateRect.x, templateRect.y, templateRect.w, templateRect.h,
@@ -125,7 +126,19 @@ function endDraw(e){
 
 // --- TEMPLATE MATCHING ---
 function applyTracking(){
-    if(!template) { alert("Draw a rectangle first"); return; }
+    // If no template exists, just use the full screenshot as template
+    if(!template){
+        const tmpCanvas = document.createElement('canvas');
+        const tmpCtx = tmpCanvas.getContext('2d');
+        const maxSize = 50;
+        tmpCanvas.width = maxSize;
+        tmpCanvas.height = maxSize;
+        tmpCtx.drawImage(screenshotCanvas, 0, 0, screenshotCanvas.width, screenshotCanvas.height,
+            0,0,maxSize,maxSize);
+        template = tmpCtx.getImageData(0,0,maxSize,maxSize);
+        templateRect = { x:0, y:0, w:canvas.width, h:canvas.height }; // for scaling
+    }
+
     const t = template;
 
     function matchFrame(){
@@ -134,7 +147,7 @@ function applyTracking(){
 
         let bestDiff = Infinity;
         let bestX=0, bestY=0;
-        const step = 4; // scan every 4 pixels for speed
+        const step = 4;
 
         for(let y=0; y<=frame.height-t.height; y+=step){
             for(let x=0; x<=frame.width-t.width; x+=step){
