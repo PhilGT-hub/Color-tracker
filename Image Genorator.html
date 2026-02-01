@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Multi-Target Rectangle Tracker</title>
+<title>Super Strict Multi-Target Tracker</title>
 <style>
 body { font-family: sans-serif; text-align: center; background: #222; color: white; }
 video, canvas { border: 1px solid #555; margin-top: 10px; touch-action: none; }
@@ -12,7 +12,7 @@ button { margin: 0 5px; padding: 8px 12px; }
 </style>
 </head>
 <body>
-<h1>Multi-Target Rectangle Tracker</h1>
+<h1>Super Strict Multi-Target Tracker</h1>
 <div id="controls">
   <button id="flipBtn">Flip Camera</button>
   <button id="trackBtn">Track</button>
@@ -53,40 +53,52 @@ const rectHeight = canvas.height / 2;
 const rectX = (canvas.width - rectWidth)/2;
 const rectY = (canvas.height - rectHeight)/2;
 
-// Store multiple targets
 const targets = [];
 
-// Get average color inside rectangle
-function getAverageColor(frame, x, y, w, h){
-    let r=0,g=0,b=0,count=0;
-    for(let i=0;i<h;i+=2){
-        for(let j=0;j<w;j+=2){
-            const idx = ((y+i)*frame.width + (x+j))*4;
-            r+=frame.data[idx];
-            g+=frame.data[idx+1];
-            b+=frame.data[idx+2];
-            count++;
+// Extract a 3x3 grid of average colors from rectangle (super strict pattern)
+function extractPattern(frame, x, y, w, h){
+    const pattern = [];
+    const gx = Math.floor(w/3);
+    const gy = Math.floor(h/3);
+    for(let i=0;i<3;i++){
+        for(let j=0;j<3;j++){
+            let r=0,g=0,b=0,count=0;
+            for(let yy=0;yy<gy;yy++){
+                for(let xx=0;xx<gx;xx++){
+                    const px = x + j*gx + xx;
+                    const py = y + i*gy + yy;
+                    if(px>=frame.width || py>=frame.height) continue;
+                    const idx = (py*frame.width + px)*4;
+                    r+=frame.data[idx];
+                    g+=frame.data[idx+1];
+                    b+=frame.data[idx+2];
+                    count++;
+                }
+            }
+            pattern.push({r: r/count, g: g/count, b: b/count});
         }
     }
-    return {r: r/count, g: g/count, b: b/count};
+    return pattern;
 }
 
-// Compute color difference
-function colorDiff(c1,c2){
-    return Math.sqrt((c1.r-c2.r)**2 + (c1.g-c2.g)**2 + (c1.b-c2.b)**2);
+// Compute strict pattern difference
+function patternDiff(p1,p2){
+    let sum=0;
+    for(let i=0;i<p1.length;i++){
+        sum += Math.sqrt((p1[i].r-p2[i].r)**2 + (p1[i].g-p2[i].g)**2 + (p1[i].b-p2[i].b)**2);
+    }
+    return sum/p1.length;
 }
 
 // --- TRACK BUTTON ---
 document.getElementById('trackBtn').addEventListener('click', ()=>{
-    // Capture target color in rectangle at this moment
-    const frameCanvas = document.createElement('canvas');
-    frameCanvas.width = canvas.width;
-    frameCanvas.height = canvas.height;
-    const fctx = frameCanvas.getContext('2d');
+    const fctx = document.createElement('canvas').getContext('2d');
+    fctx.canvas.width = canvas.width;
+    fctx.canvas.height = canvas.height;
     fctx.drawImage(video,0,0,canvas.width,canvas.height);
     const frame = fctx.getImageData(0,0,canvas.width,canvas.height);
-    const avgColor = getAverageColor(frame, rectX, rectY, rectWidth, rectHeight);
-    targets.push(avgColor);
+    const pattern = extractPattern(frame, rectX, rectY, rectWidth, rectHeight);
+    targets.push(pattern);
 });
 
 // --- MAIN LOOP ---
@@ -94,29 +106,27 @@ function trackLoop(){
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
     // Draw center rectangle
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle='red';
+    ctx.lineWidth=2;
     ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
 
     const frame = ctx.getImageData(0,0,canvas.width,canvas.height);
-    const searchStep = 4;
-    const minSize = 10;
-    const scales = [0.5,0.75,1,1.25,1.5]; // simple scale tolerance
+    const searchStep = 2; // finer scanning
+    const scales = [0.5,0.75,1,1.25,1.5];
 
     targets.forEach(target=>{
         let bestDiff = Infinity;
-        let bestX=0,bestY=0;
-        let bestW=0,bestH=0;
+        let bestX=0,bestY=0,bestW=0,bestH=0;
 
         for(const scale of scales){
-            const w = Math.max(minSize, Math.floor(rectWidth*scale));
-            const h = Math.max(minSize, Math.floor(rectHeight*scale));
+            const w = Math.max(10, Math.floor(rectWidth*scale));
+            const h = Math.max(10, Math.floor(rectHeight*scale));
             for(let y=0;y<=frame.height-h;y+=searchStep){
                 for(let x=0;x<=frame.width-w;x+=searchStep){
-                    const avg = getAverageColor(frame,x,y,w,h);
-                    const diff = colorDiff(avg,target);
+                    const pattern = extractPattern(frame, x, y, w, h);
+                    const diff = patternDiff(pattern, target);
                     if(diff<bestDiff){
-                        bestDiff = diff;
+                        bestDiff=diff;
                         bestX=x;
                         bestY=y;
                         bestW=w;
@@ -126,7 +136,7 @@ function trackLoop(){
             }
         }
 
-        if(bestDiff<50){ // lower = stricter
+        if(bestDiff<15){ // SUPER STRICT threshold
             ctx.strokeStyle='lime';
             ctx.lineWidth=2;
             ctx.strokeRect(bestX,bestY,bestW,bestH);
