@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Color Tracker</title>
+<style>
+  body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
+  video, canvas { border: 1px solid #333; }
+  #controls { margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>Live Color Tracker</h1>
+<div id="controls">
+  <input type="color" id="colorPicker" value="#ff0000">
+  <label>Pick color to track</label>
+</div>
+<video id="video" autoplay playsinline width="320" height="240"></video>
+<canvas id="canvas" width="320" height="240"></canvas>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const colorPicker = document.getElementById('colorPicker');
+
+let targetColor = [255, 0, 0]; // default red
+const tolerance = 50; // adjustable color tolerance
+
+colorPicker.addEventListener('input', () => {
+  const hex = colorPicker.value;
+  targetColor = hexToRgb(hex);
+});
+
+// Access webcam
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => { video.srcObject = stream; })
+  .catch(err => { alert('Error accessing webcam: ' + err); });
+
+// Process video frames
+function processFrame() {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = frame.data;
+
+    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+    let found = false;
+
+    for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+            const i = (y * canvas.width + x) * 4;
+            const r = data[i], g = data[i+1], b = data[i+2];
+
+            if (colorMatch([r,g,b], targetColor, tolerance)) {
+                found = true;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+
+    if (found) {
+        ctx.strokeStyle = 'lime';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+    }
+
+    requestAnimationFrame(processFrame);
+}
+
+video.addEventListener('play', () => { processFrame(); });
+
+// Helpers
+function hexToRgb(hex) {
+    hex = hex.replace('#','');
+    return [parseInt(hex.substr(0,2),16), parseInt(hex.substr(2,2),16), parseInt(hex.substr(4,2),16)];
+}
+
+function colorMatch(c1, c2, tol) {
+    return Math.abs(c1[0]-c2[0]) <= tol &&
+           Math.abs(c1[1]-c2[1]) <= tol &&
+           Math.abs(c1[2]-c2[2]) <= tol;
+}
+</script>
+</body>
+</html>
