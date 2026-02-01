@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Optimized Super Strict Tracker</title>
+<title>Scale-Invariant Multi-Target Tracker</title>
 <style>
 body { font-family: sans-serif; text-align: center; background: #222; color: white; }
 video, canvas { border: 1px solid #555; margin-top: 10px; touch-action: none; }
@@ -12,7 +12,7 @@ button { margin: 0 5px; padding: 8px 12px; }
 </style>
 </head>
 <body>
-<h1>Optimized Super Strict Tracker</h1>
+<h1>Scale-Invariant Multi-Target Tracker</h1>
 <div id="controls">
   <button id="flipBtn">Flip Camera</button>
   <button id="trackBtn">Track</button>
@@ -44,7 +44,7 @@ document.getElementById('flipBtn').addEventListener('click', ()=>{
     startCamera(currentFacingMode);
 });
 
-// --- TRACKING ---
+// --- TRACKING SETUP ---
 const rectWidth = canvas.width / 2;
 const rectHeight = canvas.height / 2;
 const rectX = (canvas.width - rectWidth)/2;
@@ -52,13 +52,13 @@ const rectY = (canvas.height - rectHeight)/2;
 
 const targets = [];
 
-// small offscreen canvas for faster scanning
+// Small offscreen canvas for faster scanning
 const smallCanvas = document.createElement('canvas');
 smallCanvas.width = 160;
 smallCanvas.height = 120;
 const smallCtx = smallCanvas.getContext('2d');
 
-// Extract a 3x3 pattern from frame region
+// Extract a 3x3 color pattern from a rectangular region
 function extractPattern(frame, x, y, w, h){
     const pattern = [];
     const gx = Math.floor(w/3);
@@ -94,8 +94,10 @@ function patternDiff(p1,p2){
 
 // --- TRACK BUTTON ---
 document.getElementById('trackBtn').addEventListener('click', ()=>{
+    // Capture pattern in center rectangle from downscaled canvas
     smallCtx.drawImage(video,0,0,smallCanvas.width,smallCanvas.height);
     const frame = smallCtx.getImageData(0,0,smallCanvas.width,smallCanvas.height);
+
     // Map rectangle to small canvas coordinates
     const scaleX = smallCanvas.width / canvas.width;
     const scaleY = smallCanvas.height / canvas.height;
@@ -103,6 +105,7 @@ document.getElementById('trackBtn').addEventListener('click', ()=>{
     const sy = Math.floor(rectY*scaleY);
     const sw = Math.floor(rectWidth*scaleX);
     const sh = Math.floor(rectHeight*scaleY);
+
     const pattern = extractPattern(frame, sx, sy, sw, sh);
     targets.push({pattern, w:rectWidth, h:rectHeight});
 });
@@ -116,24 +119,25 @@ function trackLoop(){
     ctx.lineWidth=2;
     ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
 
-    // Draw targets
+    // Update small scanning canvas
     smallCtx.drawImage(video,0,0,smallCanvas.width,smallCanvas.height);
     const frame = smallCtx.getImageData(0,0,smallCanvas.width,smallCanvas.height);
 
-    const searchStep = 4;
-    const scales = [1, 1.25]; // limited scales for speed
+    const searchStep = 4; // scan every 4 pixels
+    const scales = [0.5, 0.75, 1, 1.25, 1.5]; // allow object to appear smaller/larger
 
     targets.forEach(target=>{
         let bestDiff = Infinity;
         let bestX=0,bestY=0,bestScale=1;
 
         for(const scale of scales){
-            const w = Math.max(10, Math.floor(smallCanvas.width * scale /2)); // approximate
+            const w = Math.max(10, Math.floor(smallCanvas.width * scale /2));
             const h = Math.max(10, Math.floor(smallCanvas.height * scale /2));
+
             for(let y=0;y<=frame.height-h;y+=searchStep){
                 for(let x=0;x<=frame.width-w;x+=searchStep){
-                    const patternSample = extractPattern(frame,x,y,w,h);
-                    const diff = patternDiff(patternSample, target.pattern);
+                    const candidate = extractPattern(frame,x,y,w,h);
+                    const diff = patternDiff(candidate, target.pattern);
                     if(diff<bestDiff){
                         bestDiff=diff;
                         bestX=x;
@@ -144,7 +148,8 @@ function trackLoop(){
             }
         }
 
-        if(bestDiff<15){ // strict
+        // Draw detected object if strict enough
+        if(bestDiff<15){
             const scaleX = canvas.width / smallCanvas.width;
             const scaleY = canvas.height / smallCanvas.height;
             ctx.strokeStyle='lime';
