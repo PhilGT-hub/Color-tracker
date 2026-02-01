@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Object Tracker No Rectangle Required</title>
+<title>Object Tracker with Optional Rectangle</title>
 <style>
 body { font-family: sans-serif; text-align: center; background: #f0f0f0; padding: 20px; }
 video, canvas { border: 1px solid #333; margin-top: 10px; touch-action: none; }
@@ -12,7 +12,7 @@ button { margin: 0 5px; padding: 8px 12px; }
 </style>
 </head>
 <body>
-<h1>Object Tracker (No Rectangle Needed)</h1>
+<h1>Object Tracker (Optional Rectangle)</h1>
 <div id="controls">
   <button id="screenshotBtn">Screen Shot</button>
   <button id="applyBtn">Apply Tracking</button>
@@ -126,8 +126,13 @@ function endDraw(e){
 
 // --- TEMPLATE MATCHING ---
 function applyTracking(){
-    // If no template exists, just use the full screenshot as template
+    // If no template, use full screenshot
     if(!template){
+        ctx.drawImage(screenshotCanvas,0,0,canvas.width,canvas.height);
+        ctx.fillStyle = "yellow";
+        ctx.font = "16px sans-serif";
+        ctx.fillText("No rectangle selected", 10, 20);
+
         const tmpCanvas = document.createElement('canvas');
         const tmpCtx = tmpCanvas.getContext('2d');
         const maxSize = 50;
@@ -136,24 +141,34 @@ function applyTracking(){
         tmpCtx.drawImage(screenshotCanvas, 0, 0, screenshotCanvas.width, screenshotCanvas.height,
             0,0,maxSize,maxSize);
         template = tmpCtx.getImageData(0,0,maxSize,maxSize);
-        templateRect = { x:0, y:0, w:canvas.width, h:canvas.height }; // for scaling
+        templateRect = { x:0, y:0, w:canvas.width, h:canvas.height };
     }
 
     const t = template;
+    const maxDiffPerPixel = 30; // stricter matching
+    const numPixels = t.width * t.height;
 
     function matchFrame(){
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+        // If no rectangle was selected, keep showing the text
+        if(!templateRect || (templateRect.x===0 && templateRect.y===0 && templateRect.w===canvas.width && templateRect.h===canvas.height)){
+            ctx.fillStyle = "yellow";
+            ctx.font = "16px sans-serif";
+            ctx.fillText("No rectangle selected", 10, 20);
+        }
+
         const frame = ctx.getImageData(0,0,canvas.width,canvas.height);
 
         let bestDiff = Infinity;
         let bestX=0, bestY=0;
-        const step = 4;
+        const step = 2;
 
         for(let y=0; y<=frame.height-t.height; y+=step){
             for(let x=0; x<=frame.width-t.width; x+=step){
                 let diff=0;
-                for(let ty=0; ty<t.height; ty+=2){
-                    for(let tx=0; tx<t.width; tx+=2){
+                for(let ty=0; ty<t.height; ty+=1){
+                    for(let tx=0; tx<t.width; tx+=1){
                         const fi = ((y+ty)*frame.width + (x+tx))*4;
                         const ti = (ty*t.width + tx)*4;
                         diff += Math.abs(frame.data[fi]-t.data[ti]);
@@ -161,18 +176,27 @@ function applyTracking(){
                         diff += Math.abs(frame.data[fi+2]-t.data[ti+2]);
                     }
                 }
-                if(diff<bestDiff){ bestDiff=diff; bestX=x; bestY=y; }
+                const avgDiff = diff / numPixels;
+                if(avgDiff < bestDiff) {
+                    bestDiff = avgDiff;
+                    bestX = x;
+                    bestY = y;
+                }
             }
         }
 
-        const scaleX = templateRect.w / t.width;
-        const scaleY = templateRect.h / t.height;
-        ctx.strokeStyle = 'lime';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(bestX,bestY,t.width*scaleX, t.height*scaleY);
+        // Only draw rectangle if match is close enough
+        if(bestDiff <= maxDiffPerPixel){
+            const scaleX = templateRect.w / t.width;
+            const scaleY = templateRect.h / t.height;
+            ctx.strokeStyle = 'lime';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(bestX,bestY,t.width*scaleX, t.height*scaleY);
+        }
 
         requestAnimationFrame(matchFrame);
     }
+
     matchFrame();
 }
 
